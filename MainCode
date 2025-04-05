@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Practice Analyzer</title>
+  <style>
+    /* Global Styles */
+    body {
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+      background: #f4f7f9;
+      color: #333;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .container {
+      background: #fff;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      width: 90%;
+      max-width: 800px;
+    }
+    h1, h2 {
+      color: #2c3e50;
+      margin-bottom: 15px;
+    }
+    h1 {
+      text-align: center;
+    }
+    section {
+      margin-bottom: 25px;
+    }
+    /* Sheet Music */
+    #sheetMusicPreview {
+      max-width: 100%;
+      border: 2px solid #e1e8ee;
+      border-radius: 5px;
+      display: block;
+      margin: 10px auto;
+    }
+    /* BPM Controls */
+    #controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 15px;
+    }
+    #controls input[type="range"] {
+      flex: 1;
+    }
+    #controls input[type="number"] {
+      width: 80px;
+      padding: 5px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    /* Buttons */
+    button {
+      background: #3498db;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+    button:disabled {
+      background: #95a5a6;
+      cursor: not-allowed;
+    }
+    button:hover:not(:disabled) {
+      background: #2980b9;
+    }
+    /* Feedback Area */
+    .feedback p {
+      background: #ecf0f1;
+      padding: 10px;
+      border-left: 5px solid #3498db;
+      border-radius: 3px;
+      margin: 5px 0;
+    }
+    /* Graph */
+    #graph {
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      background: #fff;
+      display: block;
+      margin: 0 auto;
+    }
+    /* Save/Load Section */
+    #saveLoad {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 15px;
+    }
+    input[type="file"] {
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Practice Analyzer</h1>
+    
+    <!-- Sheet Music Upload/Scan -->
+    <section>
+      <h2>Load Your Sheet Music</h2>
+      <input type="file" id="sheetMusicInput" accept="image/*">
+      <canvas id="sheetMusicCanvas" style="display:none;"></canvas>
+      <img id="sheetMusicPreview" alt="Sheet Music Preview">
+    </section>
+    
+    <!-- BPM Setting -->
+    <section id="controls">
+      <h2>Set Metronome BPM</h2>
+      <input type="range" id="bpmSlider" min="40" max="200" value="120">
+      <input type="number" id="bpmInput" min="40" max="200" value="120">
+    </section>
+    
+    <!-- Metronome and Recording Controls -->
+    <section id="metronome">
+      <h2>Metronome & Performance</h2>
+      <div style="text-align: center;">
+        <button id="startPractice">Start Practice</button>
+        <button id="stopPractice" disabled>Stop Practice</button>
+      </div>
+      <p id="metronomeStatus" style="text-align: center; margin-top: 10px;"></p>
+    </section>
+    
+    <!-- Visual Feedback -->
+    <section>
+      <h2>Feedback</h2>
+      <div id="feedbackArea" class="feedback"></div>
+      <canvas id="graph" width="750" height="150"></canvas>
+    </section>
+    
+    <!-- Save/Load Performance -->
+    <section id="saveLoad">
+      <h2>Save / Load Performance</h2>
+      <div>
+        <button id="savePerformance">Save Performance</button>
+      </div>
+      <div>
+        <input type="file" id="loadPerformance" accept=".json">
+      </div>
+    </section>
+  </div>
+  
+  <script>
+    // Global Variables
+    let bpm = 120;
+    let metronomeInterval = null;
+    let audioContext, mediaRecorder, recordedChunks = [];
+    let practiceStartTime = null;
+    let analysisData = {};
+    
+    // Sync BPM slider and input field
+    const bpmSlider = document.getElementById('bpmSlider');
+    const bpmInput = document.getElementById('bpmInput');
+    
+    bpmSlider.addEventListener('input', () => {
+      bpm = parseInt(bpmSlider.value);
+      bpmInput.value = bpm;
+    });
+    
+    bpmInput.addEventListener('input', () => {
+      bpm = parseInt(bpmInput.value);
+      bpmSlider.value = bpm;
+    });
+    
+    // Sheet Music Upload and Preview
+    const sheetMusicInput = document.getElementById('sheetMusicInput');
+    const sheetMusicPreview = document.getElementById('sheetMusicPreview');
+    const sheetMusicCanvas = document.getElementById('sheetMusicCanvas');
+    
+    sheetMusicInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if(file){
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          sheetMusicPreview.src = event.target.result;
+          // Here you would call your OMR process to extract notation from the image
+          // e.g., processSheetMusic(event.target.result);
+        }
+        reader.readAsDataURL(file);
+      }
+    });
+    
+    // Metronome Audio Click
+    function playClick() {
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      osc.frequency.value = 1000;
+      gain.gain.value = 0.5;
+      osc.connect(gain);
+      gain.connect(audioContext.destination);
+      osc.start();
+      osc.stop(audioContext.currentTime + 0.05);
+    }
+    
+    // Start/Stop Practice
+    const startBtn = document.getElementById('startPractice');
+    const stopBtn = document.getElementById('stopPractice');
+    const metronomeStatus = document.getElementById('metronomeStatus');
+    
+    startBtn.addEventListener('click', async () => {
+      // Set up Audio Context and start metronome
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      
+      // Start metronome
+      const intervalTime = (60 / bpm) * 1000;
+      metronomeInterval = setInterval(playClick, intervalTime);
+      metronomeStatus.textContent = `Metronome running at ${bpm} BPM.`;
+      
+      // Set up recording
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      recordedChunks = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordedChunks.push(event.data);
+      };
+      
+      mediaRecorder.start();
+      practiceStartTime = Date.now();
+      
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    });
+    
+    stopBtn.addEventListener('click', () => {
+      clearInterval(metronomeInterval);
+      metronomeStatus.textContent = `Practice stopped.`;
+      mediaRecorder.stop();
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      
+      mediaRecorder.onstop = () => {
+        // Run analysis after recording stops.
+        analyzePerformance();
+      };
+    });
+    
+    // Dummy analysis function with simulated feedback
+    function analyzePerformance() {
+      const now = Date.now();
+      const duration = (now - practiceStartTime) / 1000;
+      
+      // Simulate timing data (sine wave) for a timing graph
+      let timingData = [];
+      let sumTiming = 0;
+      for(let i = 0; i < duration; i += 0.1){
+        // Simulated deviation value in range [-0.5, 0.5]
+        let deviation = 0.3 * Math.sin(i) + (Math.random() - 0.5) * 0.2;
+        timingData.push(deviation);
+        sumTiming += deviation;
+      }
+      const avgDeviation = sumTiming / timingData.length;
+      
+      // Simulated feedback strings
+      let rhythmFeedback = "possible slight timing deviations";
+      if(avgDeviation > 0.1) {
+        rhythmFeedback += " - possible speeding up (playing too fast)";
+      } else if(avgDeviation < -0.1) {
+        rhythmFeedback += " - possible slowing down (playing too slow)";
+      } else {
+        rhythmFeedback += " - possible consistent tempo";
+      }
+      
+      const pitchFeedback = "possible missed pitches on certain notes";
+      const dynamicsFeedback = "possible inconsistencies in volume";
+      const articulationFeedback = "possible missing staccato or legato nuances";
+      
+      // Aggregate analysis data
+      analysisData = {
+        rhythm: rhythmFeedback,
+        pitch: pitchFeedback,
+        dynamics: dynamicsFeedback,
+        articulation: articulationFeedback,
+        timingGraph: timingData,
+      };
+      
+      // Add additional tips based on analysis
+      let tips = [];
+      
+      // Rhythm tip based on tempo deviation
+      if(avgDeviation > 0.1) {
+        tips.push("Possible Tip: Focus on slowing down slightly. Practice with a metronome at a lower BPM to gradually build a steadier pace.");
+      } else if(avgDeviation < -0.1) {
+        tips.push("Possible Tip: You may be playing too slowly. Try increasing your tempo in practice sessions and use a metronome to find a consistent speed.");
+      } else {
+        tips.push("Possible Tip: Your tempo seems consistent. Keep monitoring your rhythm as you progress.");
+      }
+      
+      // Additional general tips
+      tips.push("Possible Tip: Review finger positions and intonation for clearer pitch accuracy.");
+      tips.push("Possible Tip: Work on varying your bow speed and pressure to better control dynamics.");
+      tips.push("Possible Tip: Experiment with different bowing techniques to refine articulation (staccato vs. legato).");
+      tips.push("Possible Tip: Ensure your sheet music photos are clear. Adjust lighting or contrast if the digital interpretation seems off.");
+      
+      // Attach tips to analysisData
+      analysisData.tips = tips;
+      
+      // Display feedback and tips
+      displayFeedback();
+    }
+    
+    // Visual Feedback: Update Feedback Area and Timing Graph
+    function displayFeedback() {
+      const feedbackArea = document.getElementById('feedbackArea');
+      // Build feedback text with analysis and tips
+      let feedbackHTML = `
+        <p><strong>Rhythm:</strong> ${analysisData.rhythm}</p>
+        <p><strong>Pitch:</strong> ${analysisData.pitch}</p>
+        <p><strong>Dynamics:</strong> ${analysisData.dynamics}</p>
+        <p><strong>Articulation:</strong> ${analysisData.articulation}</p>
+        <h3>Tips:</h3>
+      `;
+      analysisData.tips.forEach(tip => {
+        feedbackHTML += `<p>${tip}</p>`;
+      });
+      feedbackArea.innerHTML = feedbackHTML;
+      
+      drawGraph(analysisData.timingGraph);
+    }
+    
+    // Draw Timing Graph on Canvas
+    function drawGraph(data) {
+      const canvas = document.getElementById('graph');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.beginPath();
+      const step = canvas.width / data.length;
+      data.forEach((value, i) => {
+        const x = i * step;
+        // Normalize deviation value (assume range [-0.5, 0.5]) to canvas height
+        const y = canvas.height / 2 - (value / 0.5) * (canvas.height / 2);
+        if(i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = '#3498db';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    
+    // Saving Performance Data
+    document.getElementById('savePerformance').addEventListener('click', () => {
+      // Create a blob for the recorded audio
+      const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+      const audioURL = URL.createObjectURL(audioBlob);
+      
+      // Add the audio URL to our analysis data
+      analysisData.audioURL = audioURL;
+      
+      // Convert analysis data to JSON and trigger a download
+      const dataStr = JSON.stringify(analysisData, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'performance.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+    
+    // Loading Performance Data
+    document.getElementById('loadPerformance').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if(file){
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          analysisData = JSON.parse(event.target.result);
+          displayFeedback();
+          // Optionally, add an audio element to replay the saved recording.
+          if(analysisData.audioURL) {
+            let audioEl = document.createElement('audio');
+            audioEl.controls = true;
+            audioEl.src = analysisData.audioURL;
+            document.getElementById('feedbackArea').appendChild(audioEl);
+          }
+        };
+        reader.readAsText(file);
+      }
+    });
+  </script>
+</body>
+</html>
